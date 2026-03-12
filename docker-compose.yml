@@ -1,0 +1,124 @@
+version: "3.8"
+
+services:
+  app:
+    # 현재 프로젝트 루트의 Dockerfile을 사용해 app 이미지를 빌드합니다.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: health-check-app
+    ports:
+      - "8080:8080"
+    environment:
+      # MySQL 연결 정보입니다.
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/healthcheck?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 1234
+
+      # Redis 연결 정보입니다.
+      SPRING_DATA_REDIS_HOST: cache
+      SPRING_DATA_REDIS_PORT: 6379
+
+      # Kafka 연결 정보입니다.
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+    networks:
+      - backend
+
+  db:
+    # MySQL 8.0 공식 이미지를 사용합니다.
+    image: mysql:8.0
+    container_name: health-check-mysql
+    ports:
+      - "3307:3306"
+    environment:
+      # MySQL 초기 계정과 DB 생성 설정입니다.
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_DATABASE: healthcheck
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command:
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      # MySQL이 실제로 응답 가능한 상태인지 확인합니다.
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p1234"]  # 변경된 부분: healthcheck 비밀번호 수정
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - backend
+
+  cache:
+    # Redis 7 공식 이미지를 사용합니다.
+    image: redis:7
+    container_name: health-check-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      # Redis가 실제로 PONG 응답 가능한 상태인지 확인합니다.
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - backend
+
+  broker:
+    # Kafka 3.7.0 이미지를 사용합니다.
+    image: apache/kafka:3.7.0
+    container_name: health-check-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # KRaft 단일 브로커 설정입니다.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      # 내부 리스너 설정입니다.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+
+      # 브로커/컨트롤러 관련 필수 설정입니다.
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+
+      # 단일 브로커 테스트용 설정입니다.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # KRaft 모드용 클러스터 ID입니다.  # 변경된 부분: CLUSTER_ID 추가
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      # Kafka 포트가 열렸는지 확인합니다.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - backend
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:
+
+networks:
+  backend:
+    driver: bridge
