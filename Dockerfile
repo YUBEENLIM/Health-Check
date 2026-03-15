@@ -1,14 +1,37 @@
-# Java 17 실행 환경이 포함된 베이스 이미지를 사용합니다.
-FROM eclipse-temurin:17-jdk-jammy
+# 1단계: 애플리케이션 빌드용 이미지
+FROM eclipse-temurin:17-jdk-jammy AS builder
 
-# 컨테이너 내부 작업 디렉토리를 /app 으로 설정합니다.
+# 작업 디렉토리 설정
 WORKDIR /app
 
-# 로컬에서 빌드된 jar 파일을 컨테이너 내부로 복사합니다.
-COPY build/libs/*.jar app.jar
+# Gradle Wrapper와 빌드 설정 파일 먼저 복사
+COPY gradlew .                         # 변경된 부분: gradlew 복사
+COPY gradle gradle                     # 변경된 부분: gradle 폴더 복사
+COPY build.gradle .                    # 변경된 부분: build.gradle 복사
+COPY settings.gradle .                 # 변경된 부분: settings.gradle 복사
 
-# 스프링 부트 애플리케이션이 사용하는 포트를 명시합니다.
+# gradlew 실행 권한 부여
+RUN chmod +x ./gradlew                 # 변경된 부분: 리눅스 컨테이너에서 실행 가능하도록 권한 추가
+
+# 소스 코드 복사
+COPY src src                           # 변경된 부분: src 전체 복사
+
+# 테스트를 포함해 빌드하려면 build, 테스트 제외면 bootJar 사용 가능
+RUN ./gradlew bootJar                  # 변경된 부분: 컨테이너 내부에서 jar 생성
+
+# 2단계: 실행 전용 이미지
+FROM eclipse-temurin:17-jre-jammy      # 변경된 부분: 실행만 하므로 jre 이미지 사용
+
+# 컨테이너 내부 작업 디렉토리
+WORKDIR /app
+
+# builder 단계에서 생성된 jar 파일 복사
+COPY --from=builder /app/build/libs/*.jar app.jar
+
+# 변경된 부분: 로컬이 아니라 builder에서 복사
+
+# 애플리케이션 포트 명시
 EXPOSE 8080
 
-# 컨테이너 시작 시 애플리케이션을 실행합니다.
+# 컨테이너 시작 시 실행
 ENTRYPOINT ["java", "-jar", "app.jar"]
