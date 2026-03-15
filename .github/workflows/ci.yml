@@ -31,3 +31,11 @@ jobs:
 
       - name: 테스트 실행
         run: ./gradlew clean test --no-daemon  # clean 추가
+
+      - name: JUnit Test Report 게시
+        uses: dorny/test-reporter@v1
+        if: always()  # 테스트 실패해도 리포트 생성
+        with:
+          name: JUnit Tests
+          path: build/test-results/test/*.xml
+          reporter: java-junit
